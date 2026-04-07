@@ -25,19 +25,19 @@ def transcribe_audio_to_ass(audio_path: str, output_ass_path: str, model_size: s
             model = WhisperModel(model_size, device="auto", compute_type="auto")
             print("Starting transcription...")
             # The exception often happens here because CUDA libraries are lazily loaded
-            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=False)
+            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
             segments = list(segments) # force generation to trigger any lazy load errors
         except Exception as gpu_e:
             print(f"GPU/Transcription failed ({gpu_e}). Falling back to CPU...")
             model = WhisperModel(model_size, device="cpu", compute_type="int8")
             print("Starting transcription (CPU fallback)...")
-            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=False)
+            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
             segments = list(segments)
 
         print(f"Detected language '{info.language}' with probability {info.language_probability}")
 
         # ASS header with styles
-        # Style format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+        # Alignment: 5 is center-middle
         ass_content = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -46,20 +46,53 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,90,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,10,10,150,1
+Style: Default,Arial,140,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,8,4,5,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-        # Convert segments to ASS events
+        # We will group words dynamically. Max 3 words or max ~15 characters per chunk.
+        chunks = []
         for segment in segments:
-            start_time = ms_to_ass_time(segment.start)
-            end_time = ms_to_ass_time(segment.end)
-            text = segment.text.strip()
+            current_chunk = []
+            current_chunk_length = 0
 
-            # Simple fade effect for modern feel: {\fad(150,150)}
-            fade_effect = r"{\fad(150,150)}"
-            ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{fade_effect}{text}\n"
+            for word in segment.words:
+                word_text = word.word.strip()
+                if not word_text:
+                    continue
+
+                # If adding this word exceeds limits (e.g. 2-3 words or 15 chars), push the current chunk and start a new one
+                if current_chunk and (len(current_chunk) >= 2 or current_chunk_length + len(word_text) > 12):
+                    # Save current chunk
+                    start_t = current_chunk[0].start
+                    end_t = current_chunk[-1].end
+                    text_str = " ".join([w.word.strip() for w in current_chunk])
+                    chunks.append((start_t, end_t, text_str))
+
+                    # Reset
+                    current_chunk = []
+                    current_chunk_length = 0
+
+                current_chunk.append(word)
+                current_chunk_length += len(word_text)
+
+            # push remaining words in the segment
+            if current_chunk:
+                start_t = current_chunk[0].start
+                end_t = current_chunk[-1].end
+                text_str = " ".join([w.word.strip() for w in current_chunk])
+                chunks.append((start_t, end_t, text_str))
+
+        # Convert chunks to ASS events
+        for (start_t, end_t, text) in chunks:
+            start_time_str = ms_to_ass_time(start_t)
+            end_time_str = ms_to_ass_time(end_t)
+
+            # Since durations are short, use a very quick fade or no fade at all.
+            # Let's use a 50ms fade
+            fade_effect = r"{\fad(50,50)}"
+            ass_content += f"Dialogue: 0,{start_time_str},{end_time_str},Default,,0,0,0,,{fade_effect}{text}\n"
 
         with open(output_ass_path, "w", encoding="utf-8") as f:
             f.write(ass_content)
