@@ -19,14 +19,21 @@ def transcribe_audio_to_ass(audio_path: str, output_ass_path: str, model_size: s
     Returns True if successful, False otherwise.
     """
     try:
-        # Load whisper model
         print(f"Loading Whisper model '{model_size}'...")
-        # device="auto" uses GPU if available, else CPU.
-        # compute_type="auto" adjusts precision.
-        model = WhisperModel(model_size, device="auto", compute_type="auto")
+        try:
+            # device="auto" tries GPU first.
+            model = WhisperModel(model_size, device="auto", compute_type="auto")
+            print("Starting transcription...")
+            # The exception often happens here because CUDA libraries are lazily loaded
+            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=False)
+            segments = list(segments) # force generation to trigger any lazy load errors
+        except Exception as gpu_e:
+            print(f"GPU/Transcription failed ({gpu_e}). Falling back to CPU...")
+            model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            print("Starting transcription (CPU fallback)...")
+            segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=False)
+            segments = list(segments)
 
-        print("Starting transcription...")
-        segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=False)
         print(f"Detected language '{info.language}' with probability {info.language_probability}")
 
         # ASS header with styles
