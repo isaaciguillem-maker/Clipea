@@ -25,7 +25,7 @@ def get_ass_style_and_events(chunks: list, style_params: dict) -> str:
     """
     Generates the ASS file content based on text chunks and style parameters.
     chunks: list of tuples (start_time_sec, end_time_sec, text)
-    style_params: dict with font_name, font_size, primary_color_hex, alignment, outline_width, shadow_width, animation
+    style_params: dict with font_name, font_size, primary_color_hex, alignment, outline_width, shadow_width, animations, offset, uppercase
     """
     font_name = style_params.get("font_name", "Arial")
     font_size = style_params.get("font_size", 140)
@@ -33,7 +33,10 @@ def get_ass_style_and_events(chunks: list, style_params: dict) -> str:
     alignment_str = style_params.get("alignment", "Center")
     outline_width = style_params.get("outline_width", 8)
     shadow_width = style_params.get("shadow_width", 4)
-    animation = style_params.get("animation", "Fade")
+    entry_anim = style_params.get("entry_animation", "Fade")
+    exit_anim = style_params.get("exit_animation", "Fade")
+    uppercase = style_params.get("uppercase", False)
+    sync_offset_ms = style_params.get("sync_offset_ms", 0)
 
     # Map alignment to ASS alignment values and base Y coordinates for animations
     if alignment_str == "Top":
@@ -63,28 +66,70 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     for (start_t, end_t, text) in chunks:
-        start_time_str = ms_to_ass_time(start_t)
-        end_time_str = ms_to_ass_time(end_t)
+        # Apply sync offset (in seconds)
+        adjusted_start = max(0.0, start_t + (sync_offset_ms / 1000.0))
+        adjusted_end = max(0.1, end_t + (sync_offset_ms / 1000.0))
+
+        # Ensure start is strictly before end
+        if adjusted_start >= adjusted_end:
+            adjusted_start = adjusted_end - 0.1
+
+        start_time_str = ms_to_ass_time(adjusted_start)
+        end_time_str = ms_to_ass_time(adjusted_end)
+
+        if uppercase:
+            text = text.upper()
+
+        # Duration in ms
+        dur_ms = int((adjusted_end - adjusted_start) * 1000)
 
         # Build effect string
-        effect_tags = ""
-        fade_dur = 50 # 50ms fade
+        fade_in = 50 if entry_anim == "Fade" else 0
+        fade_out = 50 if exit_anim == "Fade" else 0
         anim_dur = 80 # 80ms movement/zoom
 
-        if animation == "Fade":
-            effect_tags = f"{{\\fad({fade_dur},{fade_dur})}}"
-        elif animation == "Zoom In":
-            effect_tags = f"{{\\fscx70\\fscy70\\t(0,{anim_dur},\\fscx100\\fscy100)\\fad({fade_dur},{fade_dur})}}"
-        elif animation == "Slide Up":
-            # \move(x1, y1, x2, y2, t1, t2)
-            effect_tags = f"{{\\move({base_x}, {base_y+80}, {base_x}, {base_y}, 0, {anim_dur})\\fad({fade_dur},{fade_dur})}}"
-        elif animation == "Slide Down":
-            effect_tags = f"{{\\move({base_x}, {base_y-80}, {base_x}, {base_y}, 0, {anim_dur})\\fad({fade_dur},{fade_dur})}}"
-        elif animation == "None":
-            effect_tags = ""
-        else:
-            effect_tags = f"{{\\fad({fade_dur},{fade_dur})}}" # Default
+        # Initialize tags
+        tags = []
 
+        # Fade tags
+        if entry_anim != "None" or exit_anim != "None":
+            # If not explicitly fade, we still use a tiny fade to smooth out appearing/disappearing
+            fade_in_val = 50 if entry_anim in ["Fade", "Zoom In", "Slide Up", "Slide Down"] else 0
+            fade_out_val = 50 if exit_anim in ["Fade", "Zoom Out", "Slide Up", "Slide Down"] else 0
+            tags.append(f"\\fad({fade_in_val},{fade_out_val})")
+
+        # Zoom tags
+        if entry_anim == "Zoom In":
+            tags.append(f"\\fscx70\\fscy70\\t(0,{anim_dur},\\fscx100\\fscy100)")
+
+        if exit_anim == "Zoom Out":
+            t_start = max(0, dur_ms - anim_dur)
+            tags.append(f"\\t({t_start},{dur_ms},\\fscx70\\fscy70)")
+
+        # Slide tags. ASS only allows one \move tag per event.
+        # If both are slide, we use \move for entry, and fallback exit to fade-only.
+        # We handle Slide Up/Down
+        is_move_used = False
+        if entry_anim == "Slide Up":
+            tags.append(f"\\move({base_x}, {base_y+80}, {base_x}, {base_y}, 0, {anim_dur})")
+            is_move_used = True
+        elif entry_anim == "Slide Down":
+            tags.append(f"\\move({base_x}, {base_y-80}, {base_x}, {base_y}, 0, {anim_dur})")
+            is_move_used = True
+
+        if exit_anim == "Slide Up" and not is_move_used:
+            t_start = max(0, dur_ms - anim_dur)
+            tags.append(f"\\move({base_x}, {base_y}, {base_x}, {base_y-80}, {t_start}, {dur_ms})")
+            is_move_used = True
+        elif exit_anim == "Slide Down" and not is_move_used:
+            t_start = max(0, dur_ms - anim_dur)
+            tags.append(f"\\move({base_x}, {base_y}, {base_x}, {base_y+80}, {t_start}, {dur_ms})")
+            is_move_used = True
+
+        # If no \move is used but position is default, we can just optionally use \pos
+        # But ASS default position based on alignment is fine if no \pos or \move is present.
+
+        effect_tags = f"{{{ ''.join(tags) }}}" if tags else ""
         ass_content += f"Dialogue: 0,{start_time_str},{end_time_str},Default,,0,0,0,,{effect_tags}{text}\n"
 
     return ass_content
@@ -154,7 +199,13 @@ def generate_preview_frame(video_path: str, style_params: dict, output_image_pat
         temp_ass = "temp_preview.ass"
         # Create a dummy chunk that lasts for 10 seconds
         chunks = [(0.0, 10.0, "Sample Text")]
-        generate_ass_file(chunks, temp_ass, style_params)
+
+        # Override sync_offset_ms for the preview so the text always appears at 0.5s
+        # regardless of the user's timeline offset settings.
+        preview_style = style_params.copy()
+        preview_style["sync_offset_ms"] = 0
+
+        generate_ass_file(chunks, temp_ass, preview_style)
 
         ass_path_abs = os.path.abspath(temp_ass)
         ass_filter_path = ass_path_abs.replace("\\", "/").replace(":", "\\:")

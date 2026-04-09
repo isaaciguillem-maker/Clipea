@@ -29,7 +29,10 @@ class App(ctk.CTk):
         self.alignment = ctk.StringVar(value="Center")
         self.outline_width = ctk.IntVar(value=8)
         self.shadow_width = ctk.IntVar(value=4)
-        self.animation = ctk.StringVar(value="Fade")
+        self.entry_animation = ctk.StringVar(value="Fade")
+        self.exit_animation = ctk.StringVar(value="Fade")
+        self.uppercase = ctk.BooleanVar(value=False)
+        self.sync_offset_ms = ctk.IntVar(value=0)
 
         self.preview_debounce_timer = None
         self.current_preview_image = None
@@ -44,8 +47,15 @@ class App(ctk.CTk):
             "alignment": self.alignment.get(),
             "outline_width": self.outline_width.get(),
             "shadow_width": self.shadow_width.get(),
-            "animation": self.animation.get()
+            "entry_animation": self.entry_animation.get(),
+            "exit_animation": self.exit_animation.get(),
+            "uppercase": self.uppercase.get(),
+            "sync_offset_ms": self.sync_offset_ms.get()
         }
+
+    def on_offset_change(self, value):
+        self.lbl_offset_val.configure(text=f"{int(value)} ms")
+        self.on_style_change()
 
     def on_style_change(self, *args):
         # Debounce the preview update
@@ -118,22 +128,44 @@ class App(ctk.CTk):
         opt_align = ctk.CTkOptionMenu(frame_style, variable=self.alignment, values=["Top", "Center", "Bottom"], command=self.on_style_change)
         opt_align.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
 
-        # Animation
-        lbl_anim = ctk.CTkLabel(frame_style, text="Animation:")
-        lbl_anim.grid(row=5, column=0, padx=10, pady=5, sticky="w")
-        opt_anim = ctk.CTkOptionMenu(frame_style, variable=self.animation, values=["None", "Fade", "Zoom In", "Slide Up", "Slide Down"], command=self.on_style_change)
-        opt_anim.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
+        # Animation In/Out
+        lbl_anim_in = ctk.CTkLabel(frame_style, text="Entry Anim:")
+        lbl_anim_in.grid(row=5, column=0, padx=10, pady=5, sticky="w")
+        opt_anim_in = ctk.CTkOptionMenu(frame_style, variable=self.entry_animation, values=["None", "Fade", "Zoom In", "Slide Up", "Slide Down"], command=self.on_style_change)
+        opt_anim_in.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
+
+        lbl_anim_out = ctk.CTkLabel(frame_style, text="Exit Anim:")
+        lbl_anim_out.grid(row=6, column=0, padx=10, pady=5, sticky="w")
+        opt_anim_out = ctk.CTkOptionMenu(frame_style, variable=self.exit_animation, values=["None", "Fade", "Zoom Out", "Slide Up", "Slide Down"], command=self.on_style_change)
+        opt_anim_out.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
 
         # Outline & Shadow
         lbl_outline = ctk.CTkLabel(frame_style, text="Outline:")
-        lbl_outline.grid(row=6, column=0, padx=10, pady=5, sticky="w")
+        lbl_outline.grid(row=7, column=0, padx=10, pady=5, sticky="w")
         sld_outline = ctk.CTkSlider(frame_style, variable=self.outline_width, from_=0, to=20, command=self.on_style_change)
-        sld_outline.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
+        sld_outline.grid(row=7, column=1, padx=10, pady=5, sticky="ew")
 
         lbl_shadow = ctk.CTkLabel(frame_style, text="Shadow:")
-        lbl_shadow.grid(row=7, column=0, padx=10, pady=5, sticky="w")
+        lbl_shadow.grid(row=8, column=0, padx=10, pady=5, sticky="w")
         sld_shadow = ctk.CTkSlider(frame_style, variable=self.shadow_width, from_=0, to=20, command=self.on_style_change)
-        sld_shadow.grid(row=7, column=1, padx=10, pady=5, sticky="ew")
+        sld_shadow.grid(row=8, column=1, padx=10, pady=5, sticky="ew")
+
+        # Uppercase Checkbox
+        chk_upper = ctk.CTkCheckBox(frame_style, text="ALL UPPERCASE", variable=self.uppercase, command=self.on_style_change)
+        chk_upper.grid(row=9, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+
+        # Sync Offset
+        lbl_offset = ctk.CTkLabel(frame_style, text="Sync Offset (ms):")
+        lbl_offset.grid(row=10, column=0, padx=10, pady=5, sticky="w")
+
+        frame_offset = ctk.CTkFrame(frame_style, fg_color="transparent")
+        frame_offset.grid(row=10, column=1, padx=10, pady=5, sticky="ew")
+
+        self.lbl_offset_val = ctk.CTkLabel(frame_offset, text="0 ms", width=50)
+        self.lbl_offset_val.pack(side="right", padx=5)
+
+        sld_offset = ctk.CTkSlider(frame_offset, variable=self.sync_offset_ms, from_=-1000, to=1000, command=self.on_offset_change)
+        sld_offset.pack(side="left", fill="x", expand=True)
 
         # Output Section
         frame_out = ctk.CTkFrame(panel_controls)
@@ -227,10 +259,14 @@ class App(ctk.CTk):
 
     def _set_preview_image(self, img_path):
         try:
-            img = Image.open(img_path)
+            with Image.open(img_path) as img:
+                # Copy the image into memory and close the file handle immediately.
+                # This prevents "Permission Denied" errors on Windows when ffmpeg tries to overwrite it.
+                img_copy = img.copy()
+
             # Resize image to fit the preview panel while maintaining aspect ratio (e.g. max height 640)
-            img.thumbnail((360, 640))
-            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+            img_copy.thumbnail((360, 640))
+            ctk_img = ctk.CTkImage(light_image=img_copy, dark_image=img_copy, size=(img_copy.width, img_copy.height))
             self.lbl_preview_img.configure(image=ctk_img, text="")
             self.current_preview_image = ctk_img # keep reference
         except Exception as e:
