@@ -6,15 +6,20 @@ from PIL import Image
 
 from engine import transcribe_audio, generate_ass_file, generate_preview_frame, generate_final_video
 
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+ctk.set_appearance_mode("Light")
+
+# We will define custom colors for orange accents manually on widgets
+# Base background: #F5F6FA (light grayish blue)
+# Sidebar: #FFFFFF (white)
+# Accent: #FF6B00 (vibrant orange)
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("Auto Lyrics Video Generator")
-        self.geometry("1000x700")
+        self.geometry("1200x800")
+        self.configure(fg_color="#F5F6FA")
 
         # Variables
         self.video_path = ctk.StringVar()
@@ -64,138 +69,169 @@ class App(ctk.CTk):
         self.preview_debounce_timer = self.after(500, self.update_preview)
 
     def create_widgets(self):
-        # Main layout: 2 columns. Left: Controls, Right: Preview
+        # Base colors
+        color_accent = "#FF6B00"
+        color_accent_hover = "#E65A00"
+        color_panel = "#FFFFFF"
+        color_text = "#333333"
+
+        # Main layout:
+        # Row 0: Top Bar
+        # Row 1: Main Content (3 columns: Left Sidebar, Center Preview, Right Sidebar)
+        self.grid_rowconfigure(0, weight=0)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
 
-        # Left Panel (Controls)
-        panel_controls = ctk.CTkScrollableFrame(self)
-        panel_controls.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # ==========================================
+        # TOP BAR
+        # ==========================================
+        top_bar = ctk.CTkFrame(self, height=60, fg_color=color_panel, corner_radius=0)
+        top_bar.grid(row=0, column=0, sticky="ew")
+        top_bar.grid_columnconfigure(0, weight=1)
 
-        # Title
-        title_label = ctk.CTkLabel(panel_controls, text="Auto Lyrics Video", font=ctk.CTkFont(size=24, weight="bold"))
-        title_label.pack(pady=(10, 20))
+        # Logo / Title
+        lbl_title = ctk.CTkLabel(top_bar, text="Auto Lyrics Video", font=ctk.CTkFont(size=20, weight="bold"), text_color=color_text)
+        lbl_title.pack(side="left", padx=20, pady=15)
 
-        # Files Section
-        frame_files = ctk.CTkFrame(panel_controls)
-        frame_files.pack(fill="x", pady=5)
+        # File selection frame inside top bar
+        frame_top_files = ctk.CTkFrame(top_bar, fg_color="transparent")
+        frame_top_files.pack(side="left", padx=20, pady=10)
 
-        # Video
-        lbl_video = ctk.CTkLabel(frame_files, text="1. Video:")
-        lbl_video.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        ent_video = ctk.CTkEntry(frame_files, textvariable=self.video_path, width=200, state="readonly")
-        ent_video.grid(row=0, column=1, padx=5, pady=5)
-        btn_video = ctk.CTkButton(frame_files, text="Browse", width=60, command=self.browse_video)
-        btn_video.grid(row=0, column=2, padx=5, pady=5)
+        btn_video = ctk.CTkButton(frame_top_files, text="📂 Video", width=100, fg_color=color_panel, text_color=color_text, border_width=1, border_color="#DDDDDD", hover_color="#F0F0F0", command=self.browse_video)
+        btn_video.pack(side="left", padx=5)
 
-        # Audio
-        lbl_audio = ctk.CTkLabel(frame_files, text="2. Audio:")
-        lbl_audio.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        ent_audio = ctk.CTkEntry(frame_files, textvariable=self.audio_path, width=200, state="readonly")
-        ent_audio.grid(row=1, column=1, padx=5, pady=5)
-        btn_audio = ctk.CTkButton(frame_files, text="Browse", width=60, command=self.browse_audio)
-        btn_audio.grid(row=1, column=2, padx=5, pady=5)
+        btn_audio = ctk.CTkButton(frame_top_files, text="🎵 Audio", width=100, fg_color=color_panel, text_color=color_text, border_width=1, border_color="#DDDDDD", hover_color="#F0F0F0", command=self.browse_audio)
+        btn_audio.pack(side="left", padx=5)
 
-        # Style Section
-        frame_style = ctk.CTkFrame(panel_controls)
-        frame_style.pack(fill="x", pady=15)
+        # Export Selection
+        frame_top_export = ctk.CTkFrame(top_bar, fg_color="transparent")
+        frame_top_export.pack(side="right", padx=20, pady=10)
 
-        lbl_style_title = ctk.CTkLabel(frame_style, text="Style Customization", font=ctk.CTkFont(weight="bold"))
-        lbl_style_title.grid(row=0, column=0, columnspan=2, pady=5)
+        btn_output = ctk.CTkButton(frame_top_export, text="💾 Save As", width=100, fg_color=color_panel, text_color=color_text, border_width=1, border_color="#DDDDDD", hover_color="#F0F0F0", command=self.browse_output)
+        btn_output.pack(side="left", padx=5)
+
+        self.btn_generate = ctk.CTkButton(frame_top_export, text="Export Video", font=ctk.CTkFont(weight="bold"), fg_color=color_accent, hover_color=color_accent_hover, command=self.start_generation)
+        self.btn_generate.pack(side="left", padx=5)
+
+        # ==========================================
+        # MAIN CONTENT AREA
+        # ==========================================
+        main_content = ctk.CTkFrame(self, fg_color="transparent")
+        main_content.grid(row=1, column=0, sticky="nsew", padx=20, pady=20)
+
+        main_content.grid_rowconfigure(0, weight=1)
+        main_content.grid_columnconfigure(0, weight=0) # Left sidebar
+        main_content.grid_columnconfigure(1, weight=1) # Center preview
+        main_content.grid_columnconfigure(2, weight=0) # Right sidebar
+
+        # ==========================================
+        # LEFT SIDEBAR: Presets
+        # ==========================================
+        left_panel = ctk.CTkFrame(main_content, width=200, fg_color=color_panel, corner_radius=10)
+        left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        left_panel.grid_propagate(False)
+
+        lbl_presets = ctk.CTkLabel(left_panel, text="Presets", font=ctk.CTkFont(size=16, weight="bold"), text_color=color_text)
+        lbl_presets.pack(pady=20, padx=20, anchor="w")
+
+        # Placeholder for future presets
+        lbl_preset_ph = ctk.CTkLabel(left_panel, text="(Plantillas estarán\ndisponibles aquí)", text_color="#888888")
+        lbl_preset_ph.pack(pady=10)
+
+        # ==========================================
+        # CENTER: Live Preview
+        # ==========================================
+        center_panel = ctk.CTkFrame(main_content, fg_color="transparent")
+        center_panel.grid(row=0, column=1, sticky="nsew", padx=10)
+
+        # A frame to hold the preview image with a subtle shadow/border look
+        preview_container = ctk.CTkFrame(center_panel, fg_color=color_panel, corner_radius=15)
+        preview_container.pack(expand=True)
+
+        self.lbl_preview_img = ctk.CTkLabel(preview_container, text="Select a video to see preview", bg_color="gray90", text_color="#888888", width=360, height=640)
+        self.lbl_preview_img.pack(padx=20, pady=20)
+
+        # ==========================================
+        # RIGHT SIDEBAR: Customization
+        # ==========================================
+        right_panel = ctk.CTkScrollableFrame(main_content, width=320, fg_color=color_panel, corner_radius=10)
+        right_panel.grid(row=0, column=2, sticky="ns", padx=(10, 0))
+
+        lbl_style_title = ctk.CTkLabel(right_panel, text="Style Customization", font=ctk.CTkFont(size=16, weight="bold"), text_color=color_text)
+        lbl_style_title.pack(pady=20, padx=20, anchor="w")
 
         # Font
-        lbl_font = ctk.CTkLabel(frame_style, text="Font:")
-        lbl_font.grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        opt_font = ctk.CTkOptionMenu(frame_style, variable=self.font_name, values=["Arial", "Impact", "Verdana", "Comic Sans MS", "Times New Roman"], command=self.on_style_change)
-        opt_font.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+        frame_font = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_font.pack(fill="x", padx=20, pady=5)
+        ctk.CTkLabel(frame_font, text="Font", text_color=color_text).pack(anchor="w")
+        opt_font = ctk.CTkOptionMenu(frame_font, variable=self.font_name, values=["Arial", "Impact", "Verdana", "Comic Sans MS", "Times New Roman"], fg_color="#F0F0F0", text_color=color_text, button_color="#E0E0E0", button_hover_color="#D0D0D0", command=self.on_style_change)
+        opt_font.pack(fill="x", pady=(5,0))
 
         # Size
-        lbl_size = ctk.CTkLabel(frame_style, text="Size:")
-        lbl_size.grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        sld_size = ctk.CTkSlider(frame_style, variable=self.font_size, from_=50, to=250, command=self.on_style_change)
-        sld_size.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        frame_size = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_size.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(frame_size, text="Size", text_color=color_text).pack(anchor="w")
+        sld_size = ctk.CTkSlider(frame_size, variable=self.font_size, from_=50, to=250, button_color=color_accent, button_hover_color=color_accent_hover, progress_color=color_accent, command=self.on_style_change)
+        sld_size.pack(fill="x", pady=(5,0))
 
         # Color
-        lbl_color = ctk.CTkLabel(frame_style, text="Color:")
-        lbl_color.grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.btn_color = ctk.CTkButton(frame_style, text="Pick Color", fg_color=self.primary_color_hex.get(), command=self.pick_color)
-        self.btn_color.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+        frame_color = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_color.pack(fill="x", padx=20, pady=5)
+        ctk.CTkLabel(frame_color, text="Primary Color", text_color=color_text).pack(anchor="w")
+        self.btn_color = ctk.CTkButton(frame_color, text="Pick Color", fg_color=self.primary_color_hex.get(), text_color="black", border_width=1, border_color="#CCCCCC", command=self.pick_color)
+        self.btn_color.pack(fill="x", pady=(5,0))
 
         # Alignment
-        lbl_align = ctk.CTkLabel(frame_style, text="Position:")
-        lbl_align.grid(row=4, column=0, padx=10, pady=5, sticky="w")
-        opt_align = ctk.CTkOptionMenu(frame_style, variable=self.alignment, values=["Top", "Center", "Bottom"], command=self.on_style_change)
-        opt_align.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
+        frame_align = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_align.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(frame_align, text="Position", text_color=color_text).pack(anchor="w")
+        opt_align = ctk.CTkOptionMenu(frame_align, variable=self.alignment, values=["Top", "Center", "Bottom"], fg_color="#F0F0F0", text_color=color_text, button_color="#E0E0E0", button_hover_color="#D0D0D0", command=self.on_style_change)
+        opt_align.pack(fill="x", pady=(5,0))
 
-        # Animation In/Out
-        lbl_anim_in = ctk.CTkLabel(frame_style, text="Entry Anim:")
-        lbl_anim_in.grid(row=5, column=0, padx=10, pady=5, sticky="w")
-        opt_anim_in = ctk.CTkOptionMenu(frame_style, variable=self.entry_animation, values=["None", "Fade", "Zoom In", "Slide Up", "Slide Down"], command=self.on_style_change)
-        opt_anim_in.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
+        # Animations
+        frame_anim = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_anim.pack(fill="x", padx=20, pady=5)
+        ctk.CTkLabel(frame_anim, text="Entry Anim", text_color=color_text).pack(anchor="w")
+        opt_anim_in = ctk.CTkOptionMenu(frame_anim, variable=self.entry_animation, values=["None", "Fade", "Zoom In", "Slide Up", "Slide Down"], fg_color="#F0F0F0", text_color=color_text, button_color="#E0E0E0", button_hover_color="#D0D0D0", command=self.on_style_change)
+        opt_anim_in.pack(fill="x", pady=(5,10))
 
-        lbl_anim_out = ctk.CTkLabel(frame_style, text="Exit Anim:")
-        lbl_anim_out.grid(row=6, column=0, padx=10, pady=5, sticky="w")
-        opt_anim_out = ctk.CTkOptionMenu(frame_style, variable=self.exit_animation, values=["None", "Fade", "Zoom Out", "Slide Up", "Slide Down"], command=self.on_style_change)
-        opt_anim_out.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(frame_anim, text="Exit Anim", text_color=color_text).pack(anchor="w")
+        opt_anim_out = ctk.CTkOptionMenu(frame_anim, variable=self.exit_animation, values=["None", "Fade", "Zoom Out", "Slide Up", "Slide Down"], fg_color="#F0F0F0", text_color=color_text, button_color="#E0E0E0", button_hover_color="#D0D0D0", command=self.on_style_change)
+        opt_anim_out.pack(fill="x", pady=(5,0))
 
         # Outline & Shadow
-        lbl_outline = ctk.CTkLabel(frame_style, text="Outline:")
-        lbl_outline.grid(row=7, column=0, padx=10, pady=5, sticky="w")
-        sld_outline = ctk.CTkSlider(frame_style, variable=self.outline_width, from_=0, to=20, command=self.on_style_change)
-        sld_outline.grid(row=7, column=1, padx=10, pady=5, sticky="ew")
+        frame_fx = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_fx.pack(fill="x", padx=20, pady=10)
 
-        lbl_shadow = ctk.CTkLabel(frame_style, text="Shadow:")
-        lbl_shadow.grid(row=8, column=0, padx=10, pady=5, sticky="w")
-        sld_shadow = ctk.CTkSlider(frame_style, variable=self.shadow_width, from_=0, to=20, command=self.on_style_change)
-        sld_shadow.grid(row=8, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(frame_fx, text="Outline Width", text_color=color_text).pack(anchor="w")
+        sld_outline = ctk.CTkSlider(frame_fx, variable=self.outline_width, from_=0, to=20, button_color=color_accent, button_hover_color=color_accent_hover, progress_color=color_accent, command=self.on_style_change)
+        sld_outline.pack(fill="x", pady=(0, 10))
 
-        # Uppercase Checkbox
-        chk_upper = ctk.CTkCheckBox(frame_style, text="ALL UPPERCASE", variable=self.uppercase, command=self.on_style_change)
-        chk_upper.grid(row=9, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(frame_fx, text="Shadow Width", text_color=color_text).pack(anchor="w")
+        sld_shadow = ctk.CTkSlider(frame_fx, variable=self.shadow_width, from_=0, to=20, button_color=color_accent, button_hover_color=color_accent_hover, progress_color=color_accent, command=self.on_style_change)
+        sld_shadow.pack(fill="x", pady=(0, 5))
+
+        # Checkbox
+        chk_upper = ctk.CTkCheckBox(right_panel, text="ALL UPPERCASE", variable=self.uppercase, text_color=color_text, fg_color=color_accent, hover_color=color_accent_hover, command=self.on_style_change)
+        chk_upper.pack(padx=20, pady=15, anchor="w")
 
         # Sync Offset
-        lbl_offset = ctk.CTkLabel(frame_style, text="Sync Offset (ms):")
-        lbl_offset.grid(row=10, column=0, padx=10, pady=5, sticky="w")
+        frame_offset = ctk.CTkFrame(right_panel, fg_color="transparent")
+        frame_offset.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(frame_offset, text="Sync Offset", text_color=color_text).pack(anchor="w")
 
-        frame_offset = ctk.CTkFrame(frame_style, fg_color="transparent")
-        frame_offset.grid(row=10, column=1, padx=10, pady=5, sticky="ew")
-
-        self.lbl_offset_val = ctk.CTkLabel(frame_offset, text="0 ms", width=50)
+        offset_inner = ctk.CTkFrame(frame_offset, fg_color="transparent")
+        offset_inner.pack(fill="x")
+        self.lbl_offset_val = ctk.CTkLabel(offset_inner, text="0 ms", width=50, text_color=color_text)
         self.lbl_offset_val.pack(side="right", padx=5)
-
-        sld_offset = ctk.CTkSlider(frame_offset, variable=self.sync_offset_ms, from_=-1000, to=1000, command=self.on_offset_change)
+        sld_offset = ctk.CTkSlider(offset_inner, variable=self.sync_offset_ms, from_=-1000, to=1000, button_color=color_accent, button_hover_color=color_accent_hover, progress_color=color_accent, command=self.on_offset_change)
         sld_offset.pack(side="left", fill="x", expand=True)
 
-        # Output Section
-        frame_out = ctk.CTkFrame(panel_controls)
-        frame_out.pack(fill="x", pady=5)
-
-        lbl_output = ctk.CTkLabel(frame_out, text="3. Output:")
-        lbl_output.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        ent_output = ctk.CTkEntry(frame_out, textvariable=self.output_path, width=200, state="readonly")
-        ent_output.grid(row=0, column=1, padx=5, pady=5)
-        btn_output = ctk.CTkButton(frame_out, text="Save As", width=60, command=self.browse_output)
-        btn_output.grid(row=0, column=2, padx=5, pady=5)
-
-        self.btn_generate = ctk.CTkButton(panel_controls, text="Generate Video", command=self.start_generation, font=ctk.CTkFont(size=16, weight="bold"), height=40)
-        self.btn_generate.pack(pady=20)
-
-        # Log
-        self.textbox_log = ctk.CTkTextbox(panel_controls, height=100)
-        self.textbox_log.pack(fill="x", pady=10)
-        self.textbox_log.insert("0.0", "Logs will appear here...\n")
+        # Log Textbox (hidden until needed, but we keep it small at the bottom)
+        self.textbox_log = ctk.CTkTextbox(right_panel, height=80, fg_color="#F0F0F0", text_color=color_text)
+        self.textbox_log.pack(fill="x", padx=20, pady=20)
+        self.textbox_log.insert("0.0", "Logs...\n")
         self.textbox_log.configure(state="disabled")
-
-        # Right Panel (Preview)
-        panel_preview = ctk.CTkFrame(self)
-        panel_preview.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-
-        lbl_prev_title = ctk.CTkLabel(panel_preview, text="Live Preview", font=ctk.CTkFont(size=18, weight="bold"))
-        lbl_prev_title.pack(pady=10)
-
-        self.lbl_preview_img = ctk.CTkLabel(panel_preview, text="Select a video to see preview", bg_color="gray20", width=360, height=640)
-        self.lbl_preview_img.pack(pady=10)
 
     def pick_color(self):
         color_code = colorchooser.askcolor(title="Choose color")[1]
