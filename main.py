@@ -40,6 +40,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.alignment = ctk.StringVar(value="Center")
         self.outline_width = ctk.IntVar(value=8)
         self.shadow_width = ctk.IntVar(value=4)
+        self.glow_intensity = ctk.IntVar(value=0)
         self.entry_animation = ctk.StringVar(value="Fade")
         self.exit_animation = ctk.StringVar(value="Fade")
         self.uppercase = ctk.BooleanVar(value=False)
@@ -75,6 +76,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             "alignment": self.alignment.get(),
             "outline_width": self.outline_width.get(),
             "shadow_width": self.shadow_width.get(),
+            "glow_intensity": self.glow_intensity.get(),
             "entry_animation": self.entry_animation.get(),
             "exit_animation": self.exit_animation.get(),
             "uppercase": self.uppercase.get(),
@@ -612,7 +614,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         ctk.CTkLabel(frame_fx, text="Shadow Width", text_color=self.color_text).pack(anchor="w")
         sld_shadow = ctk.CTkSlider(frame_fx, variable=self.shadow_width, from_=0, to=20, button_color=self.color_accent, button_hover_color=self.color_accent_hover, progress_color=self.color_accent, command=self.on_style_change)
-        sld_shadow.pack(fill="x", pady=(0, 5))
+        sld_shadow.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(frame_fx, text="Glow Intensity", text_color=self.color_text).pack(anchor="w")
+        sld_glow = ctk.CTkSlider(frame_fx, variable=self.glow_intensity, from_=0, to=30, button_color=self.color_accent, button_hover_color=self.color_accent_hover, progress_color=self.color_accent, command=self.on_style_change)
+        sld_glow.pack(fill="x", pady=(0, 5))
 
         # Checkbox
         chk_upper = ctk.CTkCheckBox(right_panel, text="ALL UPPERCASE", variable=self.uppercase, text_color=self.color_text, fg_color=self.color_accent, hover_color=self.color_accent_hover, command=self.on_style_change)
