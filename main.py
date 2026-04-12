@@ -40,6 +40,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.alignment = ctk.StringVar(value="Center")
         self.outline_width = ctk.IntVar(value=8)
         self.shadow_width = ctk.IntVar(value=4)
+        self.glow_intensity = ctk.IntVar(value=0)
         self.entry_animation = ctk.StringVar(value="Fade")
         self.exit_animation = ctk.StringVar(value="Fade")
         self.uppercase = ctk.BooleanVar(value=False)
@@ -52,8 +53,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.is_playing_video = False
         self.is_playing_audio = False
 
+        self.video_total_frames = 0
+        self.video_fps = 30
+
+        self.audio_length_sec = 0.0
+        self.audio_current_pos_sec = 0.0
+        self.audio_timer = None
+
         self.create_widgets()
         self.show_phase("Upload")
+
+    def format_time(self, seconds):
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes:02d}:{secs:02d}"
 
     def get_style_params(self):
         return {
@@ -63,6 +76,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             "alignment": self.alignment.get(),
             "outline_width": self.outline_width.get(),
             "shadow_width": self.shadow_width.get(),
+            "glow_intensity": self.glow_intensity.get(),
             "entry_animation": self.entry_animation.get(),
             "exit_animation": self.exit_animation.get(),
             "uppercase": self.uppercase.get(),
@@ -188,12 +202,34 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.lbl_video_player = ctk.CTkLabel(right_col, text="No video loaded", bg_color="gray90", width=240, height=426, text_color="#888888")
         self.lbl_video_player.pack(pady=10)
 
-        self.btn_play_video = ctk.CTkButton(right_col, text="▶ Play Video", state="disabled", command=self.toggle_video_play)
-        self.btn_play_video.pack(pady=5)
+        video_controls_frame = ctk.CTkFrame(right_col, fg_color="transparent")
+        video_controls_frame.pack(fill="x", padx=20, pady=5)
+
+        self.lbl_video_time = ctk.CTkLabel(video_controls_frame, text="00:00 / 00:00", text_color=self.color_text)
+        self.lbl_video_time.pack(side="right")
+
+        self.btn_play_video = ctk.CTkButton(video_controls_frame, text="▶", width=40, state="disabled", command=self.toggle_video_play)
+        self.btn_play_video.pack(side="left", padx=(0, 10))
+
+        self.slider_video = ctk.CTkSlider(video_controls_frame, from_=0, to=100, state="disabled", command=self.on_video_scrub)
+        self.slider_video.set(0)
+        self.slider_video.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
         # Audio Player Area
-        self.btn_play_audio = ctk.CTkButton(right_col, text="▶ Play Audio", state="disabled", command=self.toggle_audio_play)
-        self.btn_play_audio.pack(pady=20)
+        ctk.CTkLabel(right_col, text="Audio Preview", font=ctk.CTkFont(weight="bold"), text_color=self.color_text).pack(pady=(20, 5))
+
+        audio_controls_frame = ctk.CTkFrame(right_col, fg_color="transparent")
+        audio_controls_frame.pack(fill="x", padx=20, pady=5)
+
+        self.lbl_audio_time = ctk.CTkLabel(audio_controls_frame, text="00:00 / 00:00", text_color=self.color_text)
+        self.lbl_audio_time.pack(side="right")
+
+        self.btn_play_audio = ctk.CTkButton(audio_controls_frame, text="▶", width=40, state="disabled", command=self.toggle_audio_play)
+        self.btn_play_audio.pack(side="left", padx=(0, 10))
+
+        self.slider_audio = ctk.CTkSlider(audio_controls_frame, from_=0, to=100, state="disabled", command=self.on_audio_scrub)
+        self.slider_audio.set(0)
+        self.slider_audio.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
         # Continue Button
         btn_continue = ctk.CTkButton(left_col, text="Continue to Customize ➔", font=ctk.CTkFont(weight="bold", size=16), height=50, fg_color=self.color_accent, hover_color=self.color_accent_hover, command=lambda: self.change_phase("Customize"))
@@ -201,51 +237,125 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         return main_content
 
+    def on_video_scrub(self, value):
+        if self.video_cap and self.video_total_frames > 0:
+            target_frame = int((value / 100.0) * self.video_total_frames)
+            self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            if not self.is_playing_video:
+                self.show_video_frame()
+
+            current_sec = target_frame / self.video_fps
+            total_sec = self.video_total_frames / self.video_fps
+            self.lbl_video_time.configure(text=f"{self.format_time(current_sec)} / {self.format_time(total_sec)}")
+
+    def on_audio_scrub(self, value):
+        if self.audio_length_sec > 0:
+            target_sec = (value / 100.0) * self.audio_length_sec
+            self.audio_current_pos_sec = target_sec
+
+            if self.is_playing_audio:
+                pygame.mixer.music.play(start=target_sec)
+
+            self.lbl_audio_time.configure(text=f"{self.format_time(target_sec)} / {self.format_time(self.audio_length_sec)}")
+
     def on_drop_audio(self, event):
         filepath = event.data.strip('{}')
-        if filepath.lower().endswith(('.mp3', '.wav', '.m4a')):
-            self.audio_path.set(filepath)
-            self.lbl_audio_status.configure(text=f"Loaded: {os.path.basename(filepath)}")
-            self.frame_drop_audio.configure(border_color="#4CAF50") # Green success
-            self.btn_play_audio.configure(state="normal")
-            try:
-                pygame.mixer.music.load(filepath)
-            except:
-                pass
-        else:
-            messagebox.showerror("Invalid File", "Please drop a valid audio file.")
+        self.load_audio(filepath)
 
     def on_drop_video(self, event):
         filepath = event.data.strip('{}')
-        if filepath.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
+        self.load_video(filepath)
+
+    def browse_video(self):
+        filename = filedialog.askopenfilename(title="Select Video", filetypes=[("Video Files", "*.mp4 *.mov *.avi *.mkv")])
+        if filename:
+            self.load_video(filename)
+
+    def browse_audio(self):
+        filename = filedialog.askopenfilename(title="Select Audio", filetypes=[("Audio Files", "*.mp3 *.wav *.m4a")])
+        if filename:
+            self.load_audio(filename)
+
+    def load_audio(self, filepath):
+        if filepath.lower().endswith(('.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg')):
+            self.audio_path.set(filepath)
+            self.lbl_audio_status.configure(text=f"Transcoding audio...")
+            self.frame_drop_audio.configure(border_color="#FFA500") # Orange processing
+            self.btn_play_audio.configure(state="disabled")
+
+            # Start transcoding in a separate thread to not block UI
+            threading.Thread(target=self._transcode_and_load_audio, args=(filepath,), daemon=True).start()
+        else:
+            messagebox.showerror("Invalid File", "Please select a valid audio file.")
+
+    def _transcode_and_load_audio(self, filepath):
+        temp_wav = "temp_preview.wav"
+        try:
+            import subprocess
+            # Convert any audio format to a standard WAV for Pygame compatibility
+            command = ["ffmpeg", "-y", "-i", filepath, "-ac", "2", "-ar", "44100", temp_wav]
+            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            if os.path.exists(temp_wav):
+                self.after(0, self._on_audio_ready, temp_wav, filepath)
+            else:
+                self.after(0, lambda: self.lbl_audio_status.configure(text="Audio Transcoding Failed"))
+                self.after(0, lambda: self.frame_drop_audio.configure(border_color="red"))
+        except Exception as e:
+            self.after(0, lambda: self.lbl_audio_status.configure(text=f"Error: {e}"))
+            self.after(0, lambda: self.frame_drop_audio.configure(border_color="red"))
+
+    def _on_audio_ready(self, wav_path, original_filepath):
+        try:
+            pygame.mixer.music.load(wav_path)
+            sound = pygame.mixer.Sound(wav_path)
+            self.audio_length_sec = sound.get_length()
+            self.audio_current_pos_sec = 0.0
+
+            self.lbl_audio_status.configure(text=f"Loaded: {os.path.basename(original_filepath)}")
+            self.frame_drop_audio.configure(border_color="#4CAF50") # Green success
+            self.btn_play_audio.configure(state="normal")
+
+            self.slider_audio.configure(state="normal")
+            self.slider_audio.set(0)
+            self.lbl_audio_time.configure(text=f"00:00 / {self.format_time(self.audio_length_sec)}")
+        except Exception as e:
+            self.lbl_audio_status.configure(text="Error loading preview audio")
+            self.frame_drop_audio.configure(border_color="red")
+
+    def load_video(self, filepath):
+        if filepath.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
             self.video_path.set(filepath)
             self.lbl_video_status.configure(text=f"Loaded: {os.path.basename(filepath)}")
             self.frame_drop_video.configure(border_color="#4CAF50") # Green success
             self.load_video_preview(filepath)
         else:
-            messagebox.showerror("Invalid File", "Please drop a valid video file.")
-
-    def browse_video(self):
-        filename = filedialog.askopenfilename(title="Select Video", filetypes=[("Video Files", "*.mp4 *.mov *.avi *.mkv")])
-        if filename:
-            self.on_drop_video(type('Event', (), {'data': filename}))
-
-    def browse_audio(self):
-        filename = filedialog.askopenfilename(title="Select Audio", filetypes=[("Audio Files", "*.mp3 *.wav *.m4a")])
-        if filename:
-            self.on_drop_audio(type('Event', (), {'data': filename}))
+            messagebox.showerror("Invalid File", "Please select a valid video file.")
 
     def load_video_preview(self, filepath):
         if self.video_cap:
             self.video_cap.release()
         self.video_cap = cv2.VideoCapture(filepath)
+
+        self.video_total_frames = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.video_fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+        if self.video_fps <= 0:
+            self.video_fps = 30
+
+        total_sec = self.video_total_frames / self.video_fps
+        self.lbl_video_time.configure(text=f"00:00 / {self.format_time(total_sec)}")
+        self.slider_video.configure(state="normal")
+        self.slider_video.set(0)
+
         self.btn_play_video.configure(state="normal")
         self.show_video_frame()
 
     def show_video_frame(self):
         if not self.video_cap or not self.video_cap.isOpened():
             return
+
         ret, frame = self.video_cap.read()
+
         if ret:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
@@ -254,37 +364,85 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.lbl_video_player.configure(image=ctk_img, text="")
             self.current_preview_image = ctk_img
 
+            # Update slider and time label
+            current_frame = self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)
+            if self.video_total_frames > 0:
+                progress = (current_frame / self.video_total_frames) * 100
+                self.slider_video.set(progress)
+
+                current_sec = current_frame / self.video_fps
+                total_sec = self.video_total_frames / self.video_fps
+                self.lbl_video_time.configure(text=f"{self.format_time(current_sec)} / {self.format_time(total_sec)}")
+
         if self.is_playing_video:
-            fps = self.video_cap.get(cv2.CAP_PROP_FPS)
-            delay = int(1000 / fps) if fps > 0 else 30
+            delay = int(1000 / self.video_fps)
             self.video_timer = self.after(delay, self.show_video_frame)
         else:
-            if not ret: # Loop video or stop at end
+            if not ret and self.video_total_frames > 0: # Loop video or stop at end
                 self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.slider_video.set(0)
+                self.lbl_video_time.configure(text=f"00:00 / {self.format_time(self.video_total_frames / self.video_fps)}")
 
     def toggle_video_play(self):
         if self.is_playing_video:
             self.is_playing_video = False
-            self.btn_play_video.configure(text="▶ Play Video")
+            self.btn_play_video.configure(text="▶")
             if self.video_timer:
                 self.after_cancel(self.video_timer)
         else:
             self.is_playing_video = True
-            self.btn_play_video.configure(text="⏸ Pause Video")
+            self.btn_play_video.configure(text="⏸")
+
+            # Restart if at end
+            if self.video_cap and self.video_total_frames > 0:
+                current_frame = self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)
+                if current_frame >= self.video_total_frames - 1:
+                    self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
             self.show_video_frame()
 
     def toggle_audio_play(self):
         if self.is_playing_audio:
             self.is_playing_audio = False
             pygame.mixer.music.pause()
-            self.btn_play_audio.configure(text="▶ Play Audio")
+            self.btn_play_audio.configure(text="▶")
+            if self.audio_timer:
+                self.after_cancel(self.audio_timer)
         else:
             self.is_playing_audio = True
-            if not pygame.mixer.music.get_busy():
+            if not pygame.mixer.music.get_busy() and self.audio_current_pos_sec == 0:
                 pygame.mixer.music.play()
             else:
                 pygame.mixer.music.unpause()
-            self.btn_play_audio.configure(text="⏸ Pause Audio")
+            self.btn_play_audio.configure(text="⏸")
+            self.update_audio_progress()
+
+    def update_audio_progress(self):
+        if not self.is_playing_audio:
+            return
+
+        if not pygame.mixer.music.get_busy():
+            # Finished playing
+            self.is_playing_audio = False
+            self.btn_play_audio.configure(text="▶")
+            self.audio_current_pos_sec = 0.0
+            self.slider_audio.set(0)
+            self.lbl_audio_time.configure(text=f"00:00 / {self.format_time(self.audio_length_sec)}")
+            return
+
+        # pygame.mixer.music.get_pos() returns ms since PLAY called, NOT global position
+        # For simplicity in this preview, we'll increment our internal counter
+        self.audio_current_pos_sec += 0.1
+
+        if self.audio_current_pos_sec > self.audio_length_sec:
+            self.audio_current_pos_sec = self.audio_length_sec
+
+        if self.audio_length_sec > 0:
+            progress = (self.audio_current_pos_sec / self.audio_length_sec) * 100
+            self.slider_audio.set(progress)
+            self.lbl_audio_time.configure(text=f"{self.format_time(self.audio_current_pos_sec)} / {self.format_time(self.audio_length_sec)}")
+
+        self.audio_timer = self.after(100, self.update_audio_progress)
 
     def create_top_bar(self):
         top_bar = ctk.CTkFrame(self, height=60, fg_color=self.color_panel, corner_radius=0)
@@ -456,7 +614,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         ctk.CTkLabel(frame_fx, text="Shadow Width", text_color=self.color_text).pack(anchor="w")
         sld_shadow = ctk.CTkSlider(frame_fx, variable=self.shadow_width, from_=0, to=20, button_color=self.color_accent, button_hover_color=self.color_accent_hover, progress_color=self.color_accent, command=self.on_style_change)
-        sld_shadow.pack(fill="x", pady=(0, 5))
+        sld_shadow.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(frame_fx, text="Glow Intensity", text_color=self.color_text).pack(anchor="w")
+        sld_glow = ctk.CTkSlider(frame_fx, variable=self.glow_intensity, from_=0, to=30, button_color=self.color_accent, button_hover_color=self.color_accent_hover, progress_color=self.color_accent, command=self.on_style_change)
+        sld_glow.pack(fill="x", pady=(0, 5))
 
         # Checkbox
         chk_upper = ctk.CTkCheckBox(right_panel, text="ALL UPPERCASE", variable=self.uppercase, text_color=self.color_text, fg_color=self.color_accent, hover_color=self.color_accent_hover, command=self.on_style_change)
@@ -511,17 +673,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.textbox_log.see("end")
         self.textbox_log.configure(state="disabled")
         self.update_idletasks()
-
-    def browse_video(self):
-        filename = filedialog.askopenfilename(title="Select Video", filetypes=[("Video Files", "*.mp4 *.mov *.avi *.mkv")])
-        if filename:
-            self.video_path.set(filename)
-            self.update_preview()
-
-    def browse_audio(self):
-        filename = filedialog.askopenfilename(title="Select Audio", filetypes=[("Audio Files", "*.mp3 *.wav *.m4a")])
-        if filename:
-            self.audio_path.set(filename)
 
     def browse_output(self):
         filename = filedialog.asksaveasfilename(title="Save Output Video", defaultextension=".mp4", filetypes=[("MP4 Video", "*.mp4")])

@@ -33,6 +33,7 @@ def get_ass_style_and_events(chunks: list, style_params: dict) -> str:
     alignment_str = style_params.get("alignment", "Center")
     outline_width = style_params.get("outline_width", 8)
     shadow_width = style_params.get("shadow_width", 4)
+    glow_intensity = style_params.get("glow_intensity", 0)
     entry_anim = style_params.get("entry_animation", "Fade")
     exit_anim = style_params.get("exit_animation", "Fade")
     uppercase = style_params.get("uppercase", False)
@@ -60,7 +61,12 @@ WrapStyle: 1
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_color},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{outline_width},{shadow_width},{align_code},10,10,10,1
+"""
+    if glow_intensity > 0:
+        # Glow style uses primary color as outline, wide outline, no shadow
+        ass_content += f"Style: Glow,{font_name},{font_size},{primary_color},&H000000FF,{primary_color},&H00000000,-1,0,0,0,100,100,0,0,1,{glow_intensity},0,{align_code},10,10,10,1\n"
 
+    ass_content += """
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
@@ -129,8 +135,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # If no \move is used but position is default, we can just optionally use \pos
         # But ASS default position based on alignment is fine if no \pos or \move is present.
 
-        effect_tags = f"{{{ ''.join(tags) }}}" if tags else ""
-        ass_content += f"Dialogue: 0,{start_time_str},{end_time_str},Default,,0,0,0,,{effect_tags}{text}\n"
+        effect_tags_str = "".join(tags)
+
+        if glow_intensity > 0:
+            # We need two lines: Layer 0 for glow, Layer 1 for actual text
+            # Glow needs \blur tag
+            glow_tags = f"{{{effect_tags_str}\\blur{glow_intensity}}}" if effect_tags_str else f"{{\\blur{glow_intensity}}}"
+            main_tags = f"{{{effect_tags_str}}}" if effect_tags_str else ""
+
+            ass_content += f"Dialogue: 0,{start_time_str},{end_time_str},Glow,,0,0,0,,{glow_tags}{text}\n"
+            ass_content += f"Dialogue: 1,{start_time_str},{end_time_str},Default,,0,0,0,,{main_tags}{text}\n"
+        else:
+            effect_tags = f"{{{effect_tags_str}}}" if effect_tags_str else ""
+            ass_content += f"Dialogue: 0,{start_time_str},{end_time_str},Default,,0,0,0,,{effect_tags}{text}\n"
 
     return ass_content
 
